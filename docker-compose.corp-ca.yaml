@@ -1,0 +1,72 @@
+#
+# Corporate TLS-interception (Cummins Prisma proxy) workaround.
+#
+# The proxy re-signs TLS connections with an internal CA that containers do not
+# trust, which makes cargo / pip / gradle fail during `docker compose build`
+# with "self-signed certificate in certificate chain".
+#
+# This override does NOT patch any upstream Dockerfile. Instead it uses BuildKit
+# named contexts to transparently replace each `FROM <image>` with a locally
+# built, CA-patched copy of that same image.
+#
+# Prerequisites (run once, from the repository root):
+#   ./corp-ca/export-corp-ca.ps1
+#   ./corp-ca/build-patched-bases.ps1
+#
+# Usage:
+#   docker compose -f docker-compose.yaml -f docker-compose.corp-ca.yaml build
+#   docker compose -f docker-compose.yaml -f docker-compose.corp-ca.yaml up -d
+#
+# Or set, in your shell:
+#   $env:COMPOSE_FILE = "docker-compose.yaml;docker-compose.corp-ca.yaml"
+#
+
+services:
+  fms:
+    build:
+      context: ./uservices
+      dockerfile: ./fms/Dockerfile
+      additional_contexts:
+        ghcr.io/rust-cross/rust-musl-cross:x86_64-musl: docker-image://corp-ca/rust-musl-cross:x86_64-musl
+        ghcr.io/rust-cross/rust-musl-cross:aarch64-musl: docker-image://corp-ca/rust-musl-cross:aarch64-musl
+
+  vehicle-properties:
+    build:
+      context: ./uservices
+      dockerfile: ./vehicle-properties/Dockerfile
+      additional_contexts:
+        ghcr.io/rust-cross/rust-musl-cross:x86_64-musl: docker-image://corp-ca/rust-musl-cross:x86_64-musl
+        ghcr.io/rust-cross/rust-musl-cross:aarch64-musl: docker-image://corp-ca/rust-musl-cross:aarch64-musl
+
+  powertrain-mode-controller:
+    build:
+      context: ./uservices
+      dockerfile: ./powertrain/Dockerfile
+      additional_contexts:
+        ghcr.io/rust-cross/rust-musl-cross:x86_64-musl: docker-image://corp-ca/rust-musl-cross:x86_64-musl
+        ghcr.io/rust-cross/rust-musl-cross:aarch64-musl: docker-image://corp-ca/rust-musl-cross:aarch64-musl
+
+  # Remote git build context - the Dockerfile cannot be edited, so the base
+  # image swap is the only practical fix.
+  ecu-updater:
+    build:
+      context: https://github.com/eclipse-uprotocol/symphony-target-example-rust.git
+      additional_contexts:
+        ghcr.io/rust-cross/rust-musl-cross:x86_64-musl: docker-image://corp-ca/rust-musl-cross:x86_64-musl
+        ghcr.io/rust-cross/rust-musl-cross:aarch64-musl: docker-image://corp-ca/rust-musl-cross:aarch64-musl
+
+  sovd-cda:
+    build:
+      context: https://github.com/eclipse-opensovd/classic-diagnostic-adapter.git
+      dockerfile: ./testcontainer/cda/Dockerfile
+      additional_contexts:
+        rust:1.88-slim-trixie: docker-image://corp-ca/rust:1.88-slim-trixie
+        debian:trixie-slim: docker-image://corp-ca/debian:trixie-slim
+
+  ecu-sim:
+    build:
+      context: ./ecu-sim
+      dockerfile: docker/Dockerfile
+      additional_contexts:
+        gradle:8-jdk21: docker-image://corp-ca/gradle:8-jdk21
+        eclipse-temurin:21-jre: docker-image://corp-ca/eclipse-temurin:21-jre

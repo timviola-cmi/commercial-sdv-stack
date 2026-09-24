@@ -133,7 +133,11 @@ services:
     networks:
       - vehicle-uprotocol
     ports:
-      - "127.0.0.1:55555:55555"
+      # Only the host-side port is configurable. The container port must stay
+      # 55555 because in-vehicle services reach it via DATABROKER_URI.
+      # On Windows, 55555 falls inside the WinNAT/Hyper-V reserved port range
+      # (dynamic range 49152-65535), so it has to be remapped - see .env.example.
+      - "127.0.0.1:${DATABROKER_PORT:-55555}:55555"
     volumes:
       - "./config/databroker/vss_vehicle_info.json:/vss_vehicle_info.json:ro"
     environment:

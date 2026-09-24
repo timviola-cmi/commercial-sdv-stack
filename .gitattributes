@@ -1,0 +1,48 @@
+#
+# SPDX-FileCopyrightText: Copyright (c) 2026 Contributors to the Eclipse Foundation
+#
+# See the NOTICE file(s) distributed with this work for additional
+# information regarding copyright ownership.
+#
+# This program and the accompanying materials are made available under the
+# terms of the Apache License Version 2.0 which is available at
+# https://www.apache.org/licenses/LICENSE-2.0
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+
+# Normalise line endings in the repository to LF.
+#
+# Without this, a Windows checkout with core.autocrlf=true rewrites shell
+# scripts to CRLF. Those scripts are COPYed into Linux containers, where the
+# kernel then reads the shebang as "#!/bin/bash\r" and the container dies with:
+#
+#   /bin/bash: - : invalid option
+#
+# Defaulting to LF keeps container entrypoints working regardless of the
+# developer's platform or git configuration.
+* text=auto eol=lf
+
+# Files that must always be LF - they are executed inside Linux containers.
+*.sh            text eol=lf
+gradlew         text eol=lf
+Dockerfile      text eol=lf
+Dockerfile.*    text eol=lf
+*.yaml          text eol=lf
+*.yml           text eol=lf
+
+# Windows-only scripts keep CRLF.
+*.bat           text eol=crlf
+*.cmd           text eol=crlf
+*.ps1           text eol=crlf
+
+# Binary files - never touch these.
+*.png           binary
+*.jpg           binary
+*.gif           binary
+*.ico           binary
+*.jar           binary
+*.pdf           binary
+*.zip           binary
+*.gz            binary
+*.mdd           binary

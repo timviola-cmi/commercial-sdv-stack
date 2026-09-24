@@ -57,7 +57,7 @@ services:
 
   sovd-cda:
     build:
-      context: https://github.com/eclipse-opensovd/classic-diagnostic-adapter.git
+      context: ../classic-diagnostic-adapter
       dockerfile: ./testcontainer/cda/Dockerfile
       additional_contexts:
         rust:1.88-slim-trixie: docker-image://corp-ca/rust:1.88-slim-trixie

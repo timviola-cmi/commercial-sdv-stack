@@ -11,9 +11,15 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-#[cfg(feature = "opa")]
-pub mod open_policy_agent;
-#[cfg(feature = "powertrain")]
-pub mod powertrain;
+use clap::Parser;
+use opensovd_cda_lib::AppArgs;
 
-pub const AUDIENCE_SOVD_CDA: &str = "sovd.cda";
+#[derive(Parser)]
+#[command(version, about, long_about = None)]
+#[command(propagate_version = true)]
+pub(crate) struct Cli {
+    #[command(flatten)]
+    pub sovd_args: AppArgs,
+    #[command(flatten)]
+    pub opa_config: common::open_policy_agent::OpaConfig,
+}

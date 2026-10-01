@@ -25,8 +25,7 @@ networks:
 volumes:
   mosquitto-data:
   mosquitto-logs:
-  spire-agent-backend-socket:
-  spire-agent-vehicle-socket:
+  spire-agent-socket:
 
 configs:
   trust-store:
@@ -34,8 +33,6 @@ configs:
 
 services:
   dozzle: # https://dozzle.dev/guide/what-is-dozzle
-    profiles:
-      - infra
     image: amir20/dozzle:latest
     volumes:
       - type: bind
@@ -48,15 +45,12 @@ services:
   # BACKEND SERVICES
 
   spire-server:
-    profiles:
-      - infra
-      - fw-update
-      - powertrain
     image: ghcr.io/spiffe/spire-server:1.15.3
     # user as recommended at https://github.com/spiffe/spire/blob/main/doc/docker_images.md
     user: "1000:1000"
     networks:
       - backend
+      - vehicle-uprotocol
     ports:
       - 8081
     configs:
@@ -69,28 +63,25 @@ services:
     command: ["-config", "/etc/spire/server/server.conf"]
     restart: unless-stopped
 
-  spire-agent-backend:
-    profiles:
-      - infra
-      - fw-update
-      - powertrain
+  spire-agent:
     image: ghcr.io/spiffe/spire-agent:1.15.3
     pid: "host"
     networks:
       - backend
+      - vehicle-uprotocol
     depends_on:
       - spire-server
     configs:
       - source: trust-store
         target: /etc/spire/agent/trusted-certs.pem
     volumes:
-      - ./config/spire/certs/spire-agent-backend-cert.pem:/etc/spire/agent/cert.pem:ro
-      - ./config/spire/certs/spire-agent-backend-key.pem:/etc/spire/agent/key.pem:ro
+      - ./config/spire/certs/spire-agent-cert.pem:/etc/spire/agent/cert.pem:ro
+      - ./config/spire/certs/spire-agent-key.pem:/etc/spire/agent/key.pem:ro
       - ./config/spire/agent/agent.conf:/etc/spire/agent/agent.conf:ro
       # the following is needed to allow other containers to talk
       # to the agent's  Workload API (via UNIX domain socket)
       - type: volume
-        source: spire-agent-backend-socket
+        source: spire-agent-socket
         target: /run/spire/agent/public
         read_only: false
       # the following is needed for the Spire Agent to be able to attest
@@ -132,10 +123,6 @@ services:
     depends_on:
       - symphony-api
   mosquitto:
-    profiles:
-      - infra
-      - fw-update
-      - powertrain
     image: eclipse-mosquitto:2
     networks:
       - backend
@@ -159,10 +146,12 @@ services:
   fms:
     profiles:
       - powertrain
+      - properties
     image: ghcr.io/eclipse-sdv-blueprints/commercial-sdv-stack/fms:latest
     build:
       context: ./uservices
       dockerfile: ./fms/Dockerfile
+    container_name: fms
     networks:
       - backend
     environment:
@@ -174,50 +163,16 @@ services:
     depends_on:
       mosquitto:
         condition: service_healthy
-      spire-agent-backend:
-        condition: service_started
     volumes:
       # the following is needed to talk to the SPIRE Agent's Workload API (via UNIX domain socket)
       - type: volume
-        source: spire-agent-backend-socket
+        source: spire-agent-socket
         target: /tmp/spire-agent/public
         read_only: false
     command: ["mqtt5"]
 
   # IN-VEHICLE SERVICES
 
-  spire-agent-vehicle:
-    profiles:
-      - infra
-      - fw-update
-      - powertrain
-    image: ghcr.io/spiffe/spire-agent:1.15.3
-    pid: "host"
-    networks:
-      - backend
-    depends_on:
-      - spire-server
-    configs:
-      - source: trust-store
-        target: /etc/spire/agent/trusted-certs.pem
-    volumes:
-      - ./config/spire/certs/spire-agent-vehicle-cert.pem:/etc/spire/agent/cert.pem:ro
-      - ./config/spire/certs/spire-agent-vehicle-key.pem:/etc/spire/agent/key.pem:ro
-      - ./config/spire/agent/agent.conf:/etc/spire/agent/agent.conf:ro
-      # the following is needed to allow other containers to talk
-      # to the agent's  Workload API (via UNIX domain socket)
-      - type: volume
-        source: spire-agent-vehicle-socket
-        target: /run/spire/agent/public
-        read_only: false
-      # the following is needed for the Spire Agent to be able to attest
-      # Docker container workloads
-      - type: bind
-        source: /var/run/docker.sock
-        target: /var/run/docker.sock
-        read_only: true
-    command: ["-config", "/etc/spire/agent/agent.conf"]
-    restart: unless-stopped
   symphony-agent:
     profiles:
       - fw-update
@@ -247,17 +202,11 @@ services:
     depends_on:
       - mosquitto
   databroker:
-    profiles:
-      - powertrain
     image: "ghcr.io/eclipse-kuksa/kuksa-databroker:0.6.1"
     networks:
       - vehicle-uprotocol
     ports:
-      # Only the host-side port is configurable. The container port must stay
-      # 55555 because in-vehicle services reach it via DATABROKER_URI.
-      # On Windows, 55555 falls inside the WinNAT/Hyper-V reserved port range
-      # (dynamic range 49152-65535), so it has to be remapped - see .env.example.
-      - "127.0.0.1:${DATABROKER_PORT:-55555}:55555"
+      - "127.0.0.1:55555:55555"
     volumes:
       - "./config/databroker/vss_vehicle_info.json:/vss_vehicle_info.json:ro"
     environment:
@@ -269,11 +218,12 @@ services:
     command: "--insecure"
   vehicle-properties:
     profiles:
-      - powertrain
+      - properties
     image: ghcr.io/eclipse-sdv-blueprints/commercial-sdv-stack/vehicle-properties:latest
     build:
       context: ./uservices
       dockerfile: ./vehicle-properties/Dockerfile
+    container_name: vehicle-properties
     networks:
       - vehicle-uprotocol
     environment:
@@ -286,11 +236,11 @@ services:
     depends_on:
       - databroker
       - mosquitto
-      - spire-agent-vehicle
+      - spire-agent
     volumes:
       # the following is needed to talk to the SPIRE Agent's Workload API (via UNIX domain socket)
       - type: volume
-        source: spire-agent-vehicle-socket
+        source: spire-agent-socket
         target: /tmp/spire-agent/public
         read_only: false
     command: ["mqtt5"]
@@ -301,6 +251,7 @@ services:
     build:
       context: ./uservices
       dockerfile: ./powertrain/Dockerfile
+    container_name: powertrain-mode-controller
     networks:
       - vehicle-uprotocol
       - vehicle-sovd
@@ -317,8 +268,6 @@ services:
         condition: service_healthy
       sovd-cda:
         condition: service_started
-      spire-agent-vehicle:
-        condition: service_started
     volumes:
       - type: bind
         source: ./config/powertrain-mode-controller
@@ -326,7 +275,7 @@ services:
         read_only: true
       # the following is needed to talk to the SPIRE Agent's Workload API (via UNIX domain socket)
       - type: volume
-        source: spire-agent-vehicle-socket
+        source: spire-agent-socket
         target: /tmp/spire-agent/public
         read_only: false
     command: ["mqtt5"]
@@ -342,27 +291,24 @@ services:
         - SOURCE_DATE_EPOCH=0
         # the SHA of the git ref we use in uservices/cda/Cargo.toml
         - SOURCE_GIT_SHA=99c60782a6e25f6cff9ba3a3418d0750f936016e
+    container_name: cda
     ports:
       - "${CDA_PORT:-20002}:20002"
     volumes:
-      - ./config/cda/config:/app/config:ro
-      - ./config/cda/odx:/app/odx:ro
+      - ./config/cda:/app/odx:ro
       # the following is needed to talk to the SPIRE Agent's Workload API (via UNIX domain socket)
       - type: volume
-        source: spire-agent-vehicle-socket
+        source: spire-agent-socket
         target: /tmp/spire-agent/public
         read_only: false
     hostname: cda
     networks:
       - vehicle-sovd
     depends_on:
-      spire-agent-vehicle:
-        condition: service_started
       ecu-sim:
         condition: service_healthy
     environment:
-      - RUST_LOG=info,cda::spiffe_security_plugin=debug
-      - AUTH_REGO_FILE
+      - RUST_LOG=info
       - SPIFFE_ENDPOINT_SOCKET=unix:/tmp/spire-agent/public/api.sock
     command: ["-d", "/app/odx"]
     restart: unless-stopped
